@@ -1,0 +1,21 @@
+# Python virtual environment (dibuat otomatis oleh run.sh / run.bat)
+.venv/
+.venv-win/
+venv/
+env/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+
+# Hasil build Arduino
+build/
+*.bin
+*.elf
+
+# File sistem / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

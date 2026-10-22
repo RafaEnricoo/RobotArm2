@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0E1726">
+<title>Robot Arm Control (USB)</title>
+<style>
+:root{
+  --ink:#0E1726;--panel:#14213A;--panel2:#1B2B49;--line:#263856;--txt:#E8EDF5;--mut:#8C9CB8;
+  --acc:#FF8A3D;--accD:#E06A1C;--servo:#5B8DFF;--safety:#F5C518;--stop:#E5383B;--go:#3DD68C;
+  --cond:Bahnschrift,"DIN Alternate","Avenir Next Condensed","sans-serif-condensed","Roboto Condensed","Arial Narrow",system-ui,sans-serif;
+  --body:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--ink);color:var(--txt);font:15px/1.45 var(--body);-webkit-tap-highlight-color:transparent}
+body{padding-bottom:110px}
+button,input{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--safety);outline-offset:2px}
+
+/* ---------- header ---------- */
+.top{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+.logo{width:34px;height:34px;flex:none}
+.brand h1{font:700 19px/1.1 var(--cond);letter-spacing:.01em}
+.brand p{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--stop);flex:none}
+.dot.on{background:var(--go);box-shadow:0 0 6px var(--go)}
+
+/* ---------- 3D stage ---------- */
+.stage{position:sticky;top:0;z-index:5;height:clamp(240px,42vh,400px);overflow:hidden;
+  background:radial-gradient(120% 95% at 50% 30%,#1D3155 0%,#132240 45%,#0E1726 100%);border-bottom:1px solid var(--line);transition:height .25s}
+.stage.big{height:66vh}
+#cv{width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#cv:active{cursor:grabbing}
+.hud{position:absolute;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.tl{top:10px;left:12px}.tr{top:10px;right:10px;justify-content:flex-end;gap:5px}.bl{bottom:10px;left:12px;right:60px;flex-direction:column;align-items:flex-start;gap:5px}.br{bottom:10px;right:10px}
+@media(max-width:600px){.vbtn{padding:5px 7px;font-size:11.5px}.mode{font-size:13px;padding:5px 8px}#tip{font-size:12px}}
+.mode{font:700 14px/1 var(--cond);padding:6px 10px;border-radius:6px;background:var(--panel2);color:var(--txt)}
+.mode[data-m=MANUAL]{background:var(--acc);color:#2A1200}
+.mode[data-m=AUTO]{background:var(--go);color:#062716}
+.mode[data-m=ESTOP]{background:var(--stop);color:#fff}
+.legend{display:flex;gap:10px;font-size:12px;color:var(--mut);background:rgba(14,23,38,.6);padding:5px 8px;border-radius:6px}
+.legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:5px}
+.vbtn{background:rgba(14,23,38,.75);border:1px solid var(--line);border-radius:8px;padding:6px 9px;font-size:12px;font-weight:600;cursor:pointer}
+.vbtn.on{border-color:var(--acc);color:var(--acc)}
+.vbtn svg{width:15px;height:15px;display:block}
+#tip{font:600 13px/1.2 var(--cond);color:var(--mut);background:rgba(14,23,38,.6);padding:5px 8px;border-radius:6px}
+#tip b{color:var(--txt);font-weight:700;margin:0 6px 0 2px}
+.sbanner{position:absolute;left:12px;right:12px;top:48px;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;display:none}
+.sbanner.show{display:block}
+.vset{position:absolute;top:48px;right:10px;width:min(300px,calc(100% - 20px));background:rgba(20,33,58,.97);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:none;font-size:13px;z-index:3}
+.vset.show{display:block}
+.vset h3{font:700 16px var(--cond);margin-bottom:4px}
+.vset p{color:var(--mut);font-size:12px;margin:8px 0 4px}
+.vset label{display:flex;align-items:center;gap:8px;padding:4px 0}
+.vset input{width:18px;height:18px;accent-color:var(--acc)}
+
+/* ---------- panel & tabs ---------- */
+.panel{padding:12px 16px 0;max-width:640px;margin:0 auto}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;gap:4px;margin-bottom:6px}
+.seg button{background:none;border:0;border-radius:9px;padding:9px 4px;font:700 16px var(--cond);color:var(--mut);cursor:pointer}
+.seg button.act{background:var(--panel2);color:var(--txt);box-shadow:inset 0 -2px 0 var(--acc)}
+.tab{display:none}.tab.act{display:block}
+.sec{padding:16px 0;border-bottom:1px solid var(--line)}
+.sec:last-child{border-bottom:0}
+.sec h2{font:700 20px/1.2 var(--cond);margin-bottom:4px}
+.note{color:var(--mut);font-size:13px;margin-bottom:12px;max-width:62ch}
+
+/* joints */
+.joint{padding:8px 0}
+.jh{display:flex;justify-content:space-between;align-items:baseline}
+.jn{font-weight:600}
+.jn small{color:var(--mut);font-weight:400;margin-left:6px}
+.jv{font:700 28px/1 var(--cond);color:var(--acc);font-variant-numeric:tabular-nums}
+.jv span{font-size:16px;color:var(--mut);margin-left:1px}
+.jc{display:flex;align-items:center;gap:10px}
+.pm{width:44px;height:40px;flex:none;border-radius:10px;background:var(--panel2);border:1px solid var(--line);font-size:22px;line-height:1;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.pm:active{background:var(--line)}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;min-width:0;height:32px;background:transparent;--p:50%}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--acc) var(--p),var(--line) var(--p))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;margin-top:-9px;border-radius:50%;background:var(--txt);border:5px solid var(--acc);box-shadow:0 2px 6px rgba(0,0,0,.5)}
+input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:var(--line)}
+input[type=range]::-moz-range-progress{height:6px;border-radius:3px;background:var(--acc)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--txt);border:5px solid var(--acc)}
+input:disabled,button:disabled{opacity:.38;cursor:not-allowed}
+
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.grow{flex:1}
+.btn{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:11px 14px;font-weight:700;font-size:14px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+.btn:active:not(:disabled){transform:translateY(1px)}
+.btn.acc{background:var(--acc);border-color:var(--acc);color:#2A1200}
+.btn.go{background:var(--go);border-color:var(--go);color:#062716}
+.btn.halt{background:var(--stop);border-color:var(--stop);color:#fff}
+.btn.ghost{background:none}
+.btn.danger{color:#FF8A8C}
+.btn.big{width:100%;padding:15px;font:700 18px var(--cond)}
+.btn.sm{padding:7px 10px;font-size:13px;border-radius:8px}
+.btn.sel{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc);color:var(--acc)}
+.dirs{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.lbl{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--mut)}
+.lbl b{color:var(--txt);font:700 18px var(--cond)}
+input[type=number]{width:100%;background:var(--ink);border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:15px;font-variant-numeric:tabular-nums}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+.state{margin-top:10px;font-size:14px;color:var(--mut)}
+.state b{color:var(--txt)}
+.chk{display:flex;align-items:center;gap:8px;margin-top:12px}
+.chk input{width:20px;height:20px;accent-color:var(--acc)}
+.count{margin-top:10px;color:var(--mut);font-size:13px}
+.count b{color:var(--txt)}
+
+/* program timeline (urutan step = memang berurutan) */
+.steps{margin-top:6px}
+.step{position:relative;padding:2px 0 18px 46px}
+.step::before{content:"";position:absolute;left:16px;top:34px;bottom:0;width:2px;background:var(--line)}
+.step:last-child::before{display:none}
+.num{position:absolute;left:0;top:0;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font:700 16px var(--cond);background:var(--panel2);border:2px solid var(--line)}
+.step.run .num{background:var(--go);border-color:var(--go);color:#062716;box-shadow:0 0 0 5px rgba(61,214,140,.18)}
+.pose{display:flex;gap:6px;flex-wrap:wrap;min-height:34px;align-items:center}
+.pose span{font:600 14px var(--cond);background:rgba(91,141,255,.12);color:#AFC6FF;border-radius:6px;padding:3px 7px;font-variant-numeric:tabular-nums}
+.pose span.cv{background:rgba(255,138,61,.14);color:var(--acc)}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.acts{display:grid;grid-template-columns:1fr 1.4fr 1fr;gap:6px}
+.acts2{display:grid;grid-template-columns:1.2fr .55fr .55fr 1.2fr 1fr;gap:6px;margin-top:6px}
+.acts .btn,.acts2 .btn{padding:8px 4px;text-align:center}
+.empty{color:var(--mut);padding:14px;border:1px dashed var(--line);border-radius:10px}
+
+/* monitor */
+.mrow{margin-bottom:12px}
+.mh{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
+.mh b{font:700 20px var(--cond);color:var(--servo)}
+.mh em{font-style:normal;color:var(--mut);font-size:13px}
+.track{position:relative;height:8px;background:var(--panel2);border-radius:4px}
+.fill{position:absolute;left:0;top:0;bottom:0;background:var(--servo);border-radius:4px;transition:width .1s}
+.mark{position:absolute;top:-4px;width:3px;height:16px;background:var(--safety);border-radius:2px;transition:left .1s}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:9px 14px;font-size:14px}
+.kv dt{color:var(--mut)}
+.kv dd{text-align:right;font:700 16px var(--cond);font-variant-numeric:tabular-nums}
+#log{font:12px/1.65 ui-monospace,Menlo,Consolas,monospace;max-height:240px;overflow:auto;color:var(--mut)}
+#log .l-err{color:#FF8A8C}#log .l-ok{color:var(--go)}
+
+/* E-STOP: tombol jamur merah di cincin kuning, seperti panel mesin */
+#estop{position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:30;width:78px;height:78px;border-radius:50%;border:0;cursor:pointer;
+  background:radial-gradient(circle at 35% 30%,#FF6B6B 0%,#D4202A 62%,#9E1219 100%);color:#fff;font:800 16px var(--cond);letter-spacing:.03em;
+  box-shadow:0 0 0 7px var(--safety),0 0 0 9px rgba(0,0,0,.45),0 12px 26px rgba(0,0,0,.6)}
+#estop.reset{background:radial-gradient(circle at 35% 30%,#FFE27A 0%,#F5C518 60%,#C99B00 100%);color:#2A1F00;box-shadow:0 0 0 7px var(--stop),0 0 0 9px rgba(0,0,0,.45),0 12px 26px rgba(0,0,0,.6)}
+#toast{position:fixed;left:16px;right:118px;bottom:calc(28px + env(safe-area-inset-bottom));z-index:29;max-width:420px;padding:11px 14px;border-radius:10px;background:#0A1220;border:1px solid var(--line);font-size:14px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}
+#toast.show{opacity:1;transform:none}
+#toast.err{border-color:var(--stop)}#toast.ok{border-color:var(--go)}
+
+@media(min-width:900px){
+  body{padding-bottom:0}
+  .app{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(380px,1fr);grid-template-rows:auto 1fr}
+  .top{grid-column:1/-1}
+  .stage,.stage.big{height:100vh;align-self:start;border-bottom:0;border-right:1px solid var(--line)}
+  #stageSize{display:none}
+  .panel{max-width:none;margin:0;padding:14px 22px 120px}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <svg class="logo" viewBox="0 0 34 34" aria-hidden="true">
+      <rect x="4" y="27" width="18" height="4" rx="1" fill="#FF8A3D"/>
+      <path d="M11 27 L11 17 L23 9 L28 15" fill="none" stroke="#FF8A3D" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="11" cy="17" r="3" fill="#5B8DFF"/><circle cx="23" cy="9" r="3" fill="#5B8DFF"/>
+      <path d="M26 17 l0 4 M30 15 l0 5" stroke="#FF8A3D" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <div class="brand">
+      <h1>Robot Arm + Conveyor</h1>
+      <p><span class="dot" id="dot"></span><span id="connTxt">Belum terhubung</span></p>
+    </div>
+    <button class="btn acc" id="btnConn" style="margin-left:auto">Hubungkan ke ESP</button>
+  </header>
+
+  <!-- ================= 3D STAGE ================= -->
+  <section class="stage" id="stage" aria-label="Visualisasi 3D robot arm">
+    <canvas id="cv"></canvas>
+    <div class="hud tl">
+      <span class="mode" id="modeChip" data-m="">...</span>
+    </div>
+    <div class="hud tr">
+      <button class="vbtn" data-view="iso">3D</button>
+      <button class="vbtn" data-view="front">Depan</button>
+      <button class="vbtn" data-view="side">Samping</button>
+      <button class="vbtn" data-view="top">Atas</button>
+      <button class="vbtn" id="vsetBtn" aria-label="Pengaturan tampilan 3D"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+    </div>
+    <div class="sbanner" id="banner"></div>
+    <div class="vset" id="vset">
+      <h3>Tampilan 3D</h3>
+      <label><input type="checkbox" id="vGhost"> Tampilkan pose target (garis kuning)</label>
+      <label><input type="checkbox" id="vTrail"> Jejak gerak ujung gripper</label>
+      <p>Kalau arah gerak di 3D berlawanan dengan robot asli, centang sendinya:</p>
+      <div id="vInv"></div>
+      <div class="row" style="margin-top:10px"><button class="btn sm" id="vClear">Hapus jejak</button><button class="btn sm" id="vReset">Reset kamera</button></div>
+    </div>
+    <div class="hud bl"><span class="legend"><span><i style="background:#E9EDF2"></i>Aktual</span><span id="lgT"><i style="background:#F5C518"></i>Target</span><span><i style="background:#5B8DFF"></i>Jejak</span></span><span id="tip">Ujung gripper</span></div>
+    <div class="hud br"><button class="vbtn" id="stageSize" aria-label="Perbesar tampilan 3D"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 14v6h6M20 10V4h-6M4 20l7-7M20 4l-7 7"/></svg></button></div>
+  </section>
+
+  <!-- ================= PANEL ================= -->
+  <div class="panel">
+    <nav class="seg" role="tablist">
+      <button data-t="manual" class="act">Manual</button>
+      <button data-t="prog">Program</button>
+      <button data-t="mon">Monitor</button>
+    </nav>
+
+    <!-- MANUAL -->
+    <section id="t-manual" class="tab act">
+      <div class="sec">
+        <h2>Sendi robot</h2>
+        <div id="servoBox"></div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn mctl" id="btnHome">Kembali ke home</button>
+          <label class="lbl grow">Kecepatan gerak manual <b><span id="mspdV">60</span> &deg;/detik</b>
+            <input type="range" id="mspd" class="mctl" min="5" max="240" value="60">
+          </label>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>Conveyor</h2>
+        <div class="dirs">
+          <button class="btn mctl" data-dir="-1">Mundur</button>
+          <button class="btn mctl" data-dir="0">Berhenti</button>
+          <button class="btn mctl" data-dir="1">Maju</button>
+        </div>
+        <label class="lbl" style="margin-top:12px">Kecepatan conveyor <b><span id="cspdV">70</span>%</b>
+          <input type="range" id="cspd" class="mctl" min="1" max="100" value="70">
+        </label>
+        <div class="state">Sekarang: <b id="convState">-</b></div>
+      </div>
+
+      <div class="sec">
+        <h2>Rekam gerakan</h2>
+        <p class="note">Atur pose dan conveyor di atas, lalu simpan sebagai step. Saat dijalankan, tiap step: conveyor diset, robot bergerak ke pose, menunggu sesuai jeda, lalu lanjut ke step berikutnya.</p>
+        <div class="g2">
+          <label class="lbl">Jeda setelah sampai (ms)<input type="number" id="recD" min="0" max="60000" step="100" value="500"></label>
+          <label class="lbl">Kecepatan ke pose ini (&deg;/detik)<input type="number" id="recS" min="5" max="240" value="60"></label>
+        </div>
+        <button class="btn acc big mctl" id="btnRec">Simpan pose sebagai step</button>
+        <div class="count">Step tersimpan: <b id="recCount">0</b></div>
+      </div>
+    </section>
+
+    <!-- PROGRAM -->
+    <section id="t-prog" class="tab">
+      <div class="sec">
+        <h2>Jalankan otomatis</h2>
+        <div class="row">
+          <button class="btn go big grow mctl" id="btnPlay" style="width:auto">Mulai</button>
+          <button class="btn halt big grow" id="btnStop" style="width:auto">Hentikan</button>
+        </div>
+        <label class="chk"><input type="checkbox" id="loop"> Ulangi terus sampai dihentikan</label>
+        <div class="state" id="runInfo">-</div>
+      </div>
+      <div class="sec">
+        <h2>Urutan gerakan <span id="nSteps" style="color:var(--mut);font-size:15px"></span></h2>
+        <p class="note">Conveyor: positif maju, negatif mundur, 0 berhenti (dalam persen). &ldquo;Coba&rdquo; menggerakkan robot ke pose step itu; &ldquo;Timpa&rdquo; mengganti pose step dengan posisi sekarang.</p>
+        <div class="steps" id="steps"></div>
+        <div class="row" style="margin-top:4px">
+          <button class="btn sm" id="btnExport">Simpan ke file</button>
+          <button class="btn sm mctl" id="btnImport">Muat dari file</button>
+          <span class="grow"></span>
+          <button class="btn sm ghost danger mctl" id="btnClear">Hapus semua step</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MONITOR -->
+    <section id="t-mon" class="tab">
+      <div class="sec">
+        <h2>Posisi servo</h2>
+        <p class="note">Biru = posisi aktual, garis kuning = target.</p>
+        <div id="monServo"></div>
+      </div>
+      <div class="sec">
+        <h2>Status sistem</h2>
+        <dl class="kv">
+          <dt>Mode</dt><dd id="kMode">-</dd>
+          <dt>Step aktif</dt><dd id="kStep">-</dd>
+          <dt>Siklus selesai</dt><dd id="kCyc">-</dd>
+          <dt>Conveyor</dt><dd id="kConv">-</dd>
+          <dt>Kecepatan servo</dt><dd id="kSpd">-</dd>
+          <dt>Web terhubung</dt><dd id="kCl">-</dd>
+          <dt>Waktu menyala</dt><dd id="kUp">-</dd>
+          <dt>Memori bebas</dt><dd id="kHeap">-</dd>
+          <dt>Alamat</dt><dd id="kAddr">-</dd>
+        </dl>
+      </div>
+      <div class="sec">
+        <h2>Catatan kejadian</h2>
+        <div id="log"></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<button id="estop" aria-label="Emergency stop">STOP</button>
+<div id="toast" role="status"></div>
+<input type="file" id="fileIn" accept=".json,application/json" hidden>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
+const MODE_TXT={MANUAL:'Manual',AUTO:'Otomatis',ESTOP:'E-STOP'};
+let ws=null, cfg=null, st=null, prog={steps:[],loop:true,mspd:60};
+let dragging={}, convDir=0, convSpd=70, lastMode='', lastStep=-2, recSTouched=false, connected=false;
+
+/* ======================================================================
+   UKURAN ROBOT UNTUK VISUALISASI 3D (cm) — samakan dengan robot asli
+   ====================================================================== */
+const KIN={
+  L0:4.5,   // tinggi poros sendi bawah (Siku) dari meja
+  L1:8.0,   // panjang lengan bawah (Siku -> Lengan Atas)
+  L2:7.5,   // panjang lengan atas (Lengan Atas -> pergelangan)
+  L3:4.5,   // panjang jari gripper
+  ELBOW0:90,// sudut lengan atas thd lengan bawah saat servo 90 deg
+  WRIST:90  // tekukan tetap pergelangan (gripper menghadap bawah)
+};
+
+/* pengaturan tampilan (disimpan di browser) */
+const VKEY='robotarm-view-v1';
+let VIS={inv:[false,false,false,false],ghost:true,trail:true,big:false};
+try{const s=JSON.parse(localStorage.getItem(VKEY)||'null');if(s)VIS=Object.assign(VIS,s)}catch(e){}
+function saveVis(){try{localStorage.setItem(VKEY,JSON.stringify(VIS))}catch(e){}}
+
+/* ================= koneksi kabel USB (Web Serial) ================= */
+let port=null,writer=null,reader=null,pingT=null,helloT=null,gotCfg=false;
+const enc=new TextEncoder();
+async function connect(){
+  if(!('serial' in navigator)){toast('Browser ini tidak mendukung koneksi USB. Pakai Microsoft Edge atau Google Chrome di laptop.','err');return}
+  try{
+    port=await navigator.serial.requestPort();
+    await port.open({baudRate:115200,bufferSize:16384});
+    try{await port.setSignals({dataTerminalReady:false,requestToSend:false})}catch(e){}
+  }catch(e){
+    port=null;
+    if(e&&e.name==='NotFoundError')return;
+    toast(e&&e.name==='InvalidStateError'||String(e).includes('Failed to open')?'Port COM sedang dipakai. Tutup Serial Monitor Arduino IDE dulu.':'Gagal membuka port: '+e.message,'err');return;
+  }
+  connected=true;gotCfg=false;setConn();log('Port USB terbuka','ok');
+  writer=port.writable.getWriter();
+  sendRaw({cmd:'hello'});
+  clearInterval(helloT);helloT=setInterval(()=>{if(!gotCfg)sendRaw({cmd:'hello'});else clearInterval(helloT)},700);
+  clearInterval(pingT);pingT=setInterval(()=>sendRaw({cmd:'ping'}),1000);
+  readLoop();
+}
+async function readLoop(){
+  const dec=new TextDecoder();let buf='';
+  try{
+    reader=port.readable.getReader();
+    for(;;){
+      const{value,done}=await reader.read();if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let i;
+      while((i=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,i).trim();buf=buf.slice(i+1);
+        if(line[0]==='{')handleMsg(line);
+        else if(line)log('ESP: '+line,/!!/.test(line)?'err':'info');
+      }
+      if(buf.length>20000)buf='';
+    }
+  }catch(e){}
+  disconnect('Kabel USB terlepas atau ESP restart');
+}
+async function disconnect(why){
+  if(!port)return;
+  clearInterval(pingT);clearInterval(helloT);
+  try{reader&&await reader.cancel()}catch(e){}
+  try{reader&&reader.releaseLock()}catch(e){}
+  try{writer&&writer.releaseLock()}catch(e){}
+  try{await port.close()}catch(e){}
+  port=writer=reader=null;
+  if(connected&&why)log(why,'err');
+  connected=false;setConn();
+}
+function handleMsg(txt){
+  let m;try{m=JSON.parse(txt)}catch(x){return}
+  if(m.t==='cfg'){gotCfg=true;cfg=m;buildServo();buildInv();renderProg();dirty=true}
+  else if(m.t==='prog'){prog=m;renderProg()}
+  else if(m.t==='st'){st=m;renderStatus()}
+  else if(m.t==='msg'){log(m.txt,m.lv);toast(m.txt,m.lv)}
+}
+let wq=Promise.resolve();
+function sendRaw(o){
+  if(!writer)return;
+  const data=enc.encode(JSON.stringify(o)+'\n');
+  wq=wq.then(()=>writer&&writer.write(data)).catch(()=>{});
+}
+function send(o){if(connected)sendRaw(o)}
+function setConn(){
+  $('#dot').classList.toggle('on',connected);
+  $('#connTxt').textContent=connected?'Terhubung lewat kabel USB':'Belum terhubung';
+  const b=$('#btnConn');b.textContent=connected?'Putuskan':'Hubungkan ke ESP';b.classList.toggle('acc',!connected);
+  applyMode();updateBanner();
+}
+$('#btnConn').onclick=()=>connected?disconnect('Koneksi diputus'):connect();
+if('serial' in navigator)navigator.serial.addEventListener('disconnect',e=>{if(port&&e.target===port)disconnect('Kabel USB terlepas')});
+const thr={};
+function throttle(key,ms,fn){
+  const now=Date.now(),t=thr[key]||(thr[key]={last:0,tm:null});
+  clearTimeout(t.tm);
+  if(now-t.last>=ms){t.last=now;fn()}
+  else t.tm=setTimeout(()=>{t.last=Date.now();fn()},ms-(now-t.last));
+}
+function setFill(el){const p=(el.value-el.min)/((el.max-el.min)||1)*100;el.style.setProperty('--p',p+'%')}
+
+/* ================= tab ================= */
+$$('.seg button').forEach(b=>b.onclick=()=>{
+  $$('.seg button').forEach(x=>x.classList.toggle('act',x===b));
+  $$('.tab').forEach(x=>x.classList.toggle('act',x.id==='t-'+b.dataset.t));
+});
+
+/* ================= servo (manual + monitor) ================= */
+const HINT=['putar kiri-kanan','angkat-turun lengan bawah','tekuk lengan atas','buka-tutup'];
+function buildServo(){
+  const box=$('#servoBox'),mon=$('#monServo');box.innerHTML='';mon.innerHTML='';
+  cfg.names.forEach((n,i)=>{
+    const r=document.createElement('div');r.className='joint';
+    r.innerHTML='<div class="jh"><span class="jn">'+n+'<small>'+(HINT[i]||'')+'</small></span><span class="jv"><b id="sv'+i+'">-</b><span>&deg;</span></span></div>'+
+      '<div class="jc"><button class="pm mctl" data-s="'+i+'" data-d="-1" aria-label="Kurangi '+n+'">&minus;</button>'+
+      '<input type="range" class="mctl" id="sl'+i+'" min="'+cfg.min[i]+'" max="'+cfg.max[i]+'" value="'+cfg.home[i]+'" aria-label="'+n+'">'+
+      '<button class="pm mctl" data-s="'+i+'" data-d="1" aria-label="Tambah '+n+'">+</button></div>';
+    box.appendChild(r);
+    const sl=r.querySelector('input');setFill(sl);
+    sl.addEventListener('pointerdown',()=>{dragging[i]=true});
+    sl.addEventListener('input',()=>{dragging[i]=true;setFill(sl);$('#sv'+i).textContent=sl.value;
+      throttle('s'+i,60,()=>send({cmd:'servo',id:i,val:+sl.value}))});
+    sl.addEventListener('change',()=>{send({cmd:'servo',id:i,val:+sl.value});setTimeout(()=>{dragging[i]=false},300)});
+    const m=document.createElement('div');m.className='mrow';
+    m.innerHTML='<div class="mh"><span>'+n+'</span><span><b id="mp'+i+'">-</b> <em>target <span id="mt'+i+'">-</span>&deg;</em></span></div>'+
+      '<div class="track"><div class="fill" id="mf'+i+'"></div><div class="mark" id="mk'+i+'"></div></div>';
+    mon.appendChild(m);
+  });
+  applyMode();
+}
+let repT=null,repI=null;
+function stopRep(){clearTimeout(repT);clearInterval(repI);repT=repI=null}
+$('#servoBox').addEventListener('pointerdown',e=>{
+  const b=e.target.closest('[data-s]');if(!b||b.disabled)return;
+  e.preventDefault();
+  const i=+b.dataset.s,d=+b.dataset.d;
+  const nudge=()=>{const sl=$('#sl'+i);const v=Math.min(+sl.max,Math.max(+sl.min,+sl.value+d));
+    sl.value=v;setFill(sl);$('#sv'+i).textContent=v;dragging[i]=true;send({cmd:'servo',id:i,val:v})};
+  nudge();stopRep();repT=setTimeout(()=>{repI=setInterval(nudge,70)},350);
+});
+['pointerup','pointercancel'].forEach(ev=>document.addEventListener(ev,()=>{
+  if(repT||repI){stopRep();setTimeout(()=>{dragging={}},300)}
+}));
+$('#btnHome').onclick=()=>send({cmd:'home'});
+$('#mspd').oninput=()=>{setFill($('#mspd'));$('#mspdV').textContent=$('#mspd').value};
+$('#mspd').onchange=()=>send({cmd:'mspeed',val:+$('#mspd').value});
+
+/* ================= conveyor ================= */
+function sendConv(){send({cmd:'conv',val:convDir*convSpd})}
+$$('[data-dir]').forEach(b=>b.onclick=()=>{convDir=+b.dataset.dir;sendConv()});
+$('#cspd').oninput=()=>{const e=$('#cspd');setFill(e);convSpd=+e.value;$('#cspdV').textContent=convSpd;if(convDir)throttle('cv',80,sendConv)};
+setFill($('#cspd'));setFill($('#mspd'));
+function convTxt(c){return c===0?'Berhenti':(c>0?'Maju ':'Mundur ')+Math.abs(c)+'%'}
+
+/* ================= rekam & program ================= */
+$('#recS').oninput=()=>{recSTouched=true};
+function recVals(){return{d:+$('#recD').value||0,s:+$('#recS').value||60}}
+$('#btnRec').onclick=()=>{const v=recVals();send({cmd:'add',d:v.d,s:v.s})};
+$('#btnPlay').onclick=()=>send({cmd:'play',from:0});
+$('#btnStop').onclick=()=>send({cmd:'stop'});
+$('#loop').onchange=()=>send({cmd:'loop',val:$('#loop').checked});
+$('#btnClear').onclick=()=>{if(prog.steps.length&&confirm('Hapus semua '+prog.steps.length+' step?'))send({cmd:'clear'})};
+$('#btnExport').onclick=()=>{
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify({loop:prog.loop,mspd:prog.mspd,steps:prog.steps},null,1)],{type:'application/json'}));
+  a.download='program-robot-arm.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+};
+$('#btnImport').onclick=()=>$('#fileIn').click();
+$('#fileIn').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{try{const d=JSON.parse(r.result);if(!Array.isArray(d.steps))throw 0;
+    if(confirm('Ganti urutan sekarang dengan '+d.steps.length+' step dari file?'))send({cmd:'import',data:d});
+  }catch(x){toast('File ini bukan program robot yang valid.','err')}};
+  r.readAsText(f);e.target.value='';
+};
+function renderProg(){
+  $('#loop').checked=!!prog.loop;
+  const ms=$('#mspd');ms.value=prog.mspd;setFill(ms);$('#mspdV').textContent=prog.mspd;
+  if(!recSTouched)$('#recS').value=prog.mspd;
+  $('#nSteps').textContent=prog.steps.length+' / '+(cfg?cfg.maxSteps:'-');
+  $('#recCount').textContent=prog.steps.length;
+  const L=$('#steps');
+  if(!prog.steps.length){
+    L.innerHTML='<p class="empty">Belum ada gerakan. Buka tab Manual, atur pose robot, lalu tekan &ldquo;Simpan pose sebagai step&rdquo;.</p>';
+  }else{
+    const names=cfg?cfg.names:['S1','S2','S3','S4'];
+    L.innerHTML=prog.steps.map((s,i)=>
+      '<div class="step" data-i="'+i+'"><span class="num">'+(i+1)+'</span>'+
+        '<div class="pose">'+s.a.map((a,j)=>'<span>'+names[j]+' '+a+'&deg;</span>').join('')+'<span class="cv">Conveyor '+convTxt(s.c).toLowerCase()+'</span></div>'+
+        '<div class="g3">'+
+          '<label class="lbl">Conveyor (%)<input type="number" class="mctl" data-k="c" min="-100" max="100" value="'+s.c+'"></label>'+
+          '<label class="lbl">Jeda (ms)<input type="number" class="mctl" data-k="d" min="0" max="60000" step="100" value="'+s.d+'"></label>'+
+          '<label class="lbl">Kecepatan<input type="number" class="mctl" data-k="s" min="5" max="240" value="'+s.s+'"></label>'+
+        '</div>'+
+        '<div class="acts">'+
+          '<button class="btn sm mctl" data-a="goto">Coba</button>'+
+          '<button class="btn sm mctl" data-a="play">Mulai dari sini</button>'+
+          '<button class="btn sm mctl" data-a="upd">Timpa</button>'+
+        '</div><div class="acts2">'+
+          '<button class="btn sm mctl" data-a="ins">+ Sisip</button>'+
+          '<button class="btn sm mctl" data-a="up" aria-label="Pindah ke atas">&uarr;</button>'+
+          '<button class="btn sm mctl" data-a="down" aria-label="Pindah ke bawah">&darr;</button>'+
+          '<button class="btn sm mctl" data-a="dup">Duplikat</button>'+
+          '<button class="btn sm ghost danger mctl" data-a="del">Hapus</button>'+
+        '</div></div>').join('');
+  }
+  lastStep=-2;applyMode();highlight();
+}
+$('#steps').addEventListener('click',e=>{
+  const b=e.target.closest('[data-a]');if(!b||b.disabled)return;
+  const i=+b.closest('.step').dataset.i,a=b.dataset.a,v=recVals();
+  if(a==='del'&&!confirm('Hapus step '+(i+1)+'?'))return;
+  if(a==='upd'&&!confirm('Timpa step '+(i+1)+' dengan pose dan conveyor saat ini?'))return;
+  const cmd={goto:{cmd:'goto',i},play:{cmd:'play',from:i},upd:{cmd:'upd',i},ins:{cmd:'add',at:i+1,d:v.d,s:v.s},
+    up:{cmd:'move',i,dir:-1},down:{cmd:'move',i,dir:1},dup:{cmd:'dup',i},del:{cmd:'del',i}}[a];
+  if(cmd)send(cmd);
+});
+$('#steps').addEventListener('change',e=>{
+  const inp=e.target.closest('[data-k]');if(!inp)return;
+  const o={cmd:'edit',i:+inp.closest('.step').dataset.i};o[inp.dataset.k]=+inp.value;send(o);
+});
+
+/* ================= status ================= */
+function applyMode(){
+  const locked=!st||st.mode!=='MANUAL'||!connected;
+  $$('.mctl').forEach(el=>{el.disabled=locked});
+}
+function highlight(){
+  const run=st&&st.mode==='AUTO'?st.step:-1;
+  $$('.step').forEach(el=>el.classList.toggle('run',+el.dataset.i===run));
+  if(run!==lastStep){lastStep=run;
+    const el=document.querySelector('.step[data-i="'+run+'"]');
+    if(el&&$('#t-prog').classList.contains('act'))el.scrollIntoView({block:'nearest',behavior:'smooth'});
+  }
+}
+function updateBanner(){
+  const b=$('#banner');let t='',bg='';
+  if(!connected){t=('serial' in navigator)?'Colok ESP ke laptop, tutup Serial Monitor Arduino IDE, lalu klik \u201cHubungkan ke ESP\u201d.':'Browser ini tidak mendukung koneksi USB. Buka file ini di Microsoft Edge atau Google Chrome.';bg='#7C2D12'}
+  else if(st&&st.mode==='ESTOP'){t='Emergency stop aktif. Tekan tombol kuning RESET untuk kembali ke manual.';bg='#7F1D1D'}
+  else if(st&&st.mode==='AUTO'){t='Program berjalan. Kontrol manual dikunci sampai dihentikan.';bg='#14532D'}
+  b.textContent=t;b.style.background=bg;b.classList.toggle('show',!!t);
+}
+function fmtUp(s){const h=Math.floor(s/3600),m=Math.floor(s%3600/60),d=s%60;return(h?h+' j ':'')+m+' m '+d+' d'}
+function renderStatus(){
+  const m=st.mode,chip=$('#modeChip');
+  chip.textContent=MODE_TXT[m]||m;chip.dataset.m=m;
+  if(m!==lastMode){lastMode=m;applyMode();updateBanner()}
+  const es=$('#estop');es.textContent=m==='ESTOP'?'RESET':'STOP';es.classList.toggle('reset',m==='ESTOP');
+  if(cfg)for(let i=0;i<cfg.names.length;i++){
+    if(!dragging[i]){const sl=$('#sl'+i);if(sl){sl.value=st.tgt[i];setFill(sl);$('#sv'+i).textContent=st.tgt[i]}}
+    const mp=$('#mp'+i);if(!mp)continue;
+    mp.textContent=st.pos[i]+'°';$('#mt'+i).textContent=st.tgt[i];
+    $('#mf'+i).style.width=(st.pos[i]/180*100)+'%';
+    $('#mk'+i).style.left='calc('+(st.tgt[i]/180*100)+'% - 1px)';
+  }
+  convDir=Math.sign(st.conv);
+  $('#convState').textContent=convTxt(st.conv);
+  $$('[data-dir]').forEach(b=>b.classList.toggle('sel',+b.dataset.dir===convDir));
+  $('#runInfo').innerHTML=m==='AUTO'
+    ?'Step <b>'+(st.step+1)+' dari '+st.n+'</b>, '+(st.wait?'menunggu jeda':'sedang bergerak')+'. Siklus selesai: <b>'+st.cyc+'</b>'
+    :'Siap. <b>'+st.n+'</b> step tersimpan'+(st.cyc?', siklus terakhir: <b>'+st.cyc+'</b>':'')+'.';
+  highlight();
+  $('#kMode').textContent=MODE_TXT[m]||m;
+  $('#kStep').textContent=m==='AUTO'?(st.step+1)+' / '+st.n+(st.wait?' (jeda)':' (bergerak)'):'-';
+  $('#kCyc').textContent=st.cyc;
+  $('#kConv').textContent=convTxt(st.conv);
+  $('#kSpd').textContent=st.spd+' °/dtk';
+  $('#kCl').textContent=st.cl;
+  $('#kUp').textContent=fmtUp(st.up);
+  $('#kHeap').textContent=(st.heap/1024).toFixed(1)+' KB';
+  $('#kAddr').textContent='Kabel USB';
+  dirty=true;
+}
+
+/* ================= E-STOP, log, toast ================= */
+$('#estop').onclick=()=>send({cmd:st&&st.mode==='ESTOP'?'reset':'estop'});
+function log(txt,lv){
+  const L=$('#log'),d=document.createElement('div');
+  d.className='l-'+(lv||'info');d.textContent=new Date().toLocaleTimeString('id-ID')+'  '+txt;
+  L.prepend(d);while(L.children.length>40)L.lastChild.remove();
+}
+let toastT=null;
+function toast(txt,lv){const t=$('#toast');t.textContent=txt;t.className='show '+(lv||'');clearTimeout(toastT);toastT=setTimeout(()=>{t.className=''},2600)}
+
+/* ======================================================================
+   MINI 3D ENGINE (Canvas 2D, tanpa library)
+   matriks affine 3x4 row-major: [r00 r01 r02 tx, r10 r11 r12 ty, r20 r21 r22 tz]
+   ====================================================================== */
+const D2R=Math.PI/180;
+function mMul(A,B){const o=new Array(12);for(let r=0;r<3;r++)for(let c=0;c<4;c++){let s=A[r*4]*B[c]+A[r*4+1]*B[4+c]+A[r*4+2]*B[8+c];if(c===3)s+=A[r*4+3];o[r*4+c]=s}return o}
+const mT=(x,y,z)=>[1,0,0,x,0,1,0,y,0,0,1,z];
+function mRX(a){const c=Math.cos(a),s=Math.sin(a);return[1,0,0,0,0,c,-s,0,0,s,c,0]}
+function mRY(a){const c=Math.cos(a),s=Math.sin(a);return[c,0,s,0,0,1,0,0,-s,0,c,0]}
+function mRZ(a){const c=Math.cos(a),s=Math.sin(a);return[c,-s,0,0,s,c,0,0,0,0,1,0]}
+const mP=(M,p)=>[M[0]*p[0]+M[1]*p[1]+M[2]*p[2]+M[3],M[4]*p[0]+M[5]*p[1]+M[6]*p[2]+M[7],M[8]*p[0]+M[9]*p[1]+M[10]*p[2]+M[11]];
+const vSub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],vDot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const vCross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const vNorm=a=>{const l=Math.hypot(a[0],a[1],a[2])||1;return[a[0]/l,a[1]/l,a[2]/l]};
+const hex=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+// material: [r,g,b, kilap(0-1), menyala(0/1)]
+const mat=(h,sp,em)=>hex(h).concat([sp||0,em||0]);
+const C={shell:mat('#E9EDF2',.55),shell2:mat('#D5DCE5',.45),graph:mat('#2C3444',.35),dark:mat('#1A202B',.2),
+  metal:mat('#AEB9C7',.8),chrome:mat('#D3DAE3',.9),acc:mat('#FF8A3D',.3,1),accD:mat('#E06A1C',.3),
+  cell:mat('#18233A',.15),cellEdge:mat('#24344F',.2),belt:mat('#1E232C',.05),stripe:mat('#39414F',.1),
+  pad:mat('#12161D',.05),led:mat('#3DD68C',0,1),lens:mat('#5B8DFF',.9,1)};
+const LIGHT=vNorm([0.45,0.9,0.35]);
+
+let F=[],castShadow=false;
+function addPoly(pts,col,center){
+  let n=vNorm(vCross(vSub(pts[1],pts[0]),vSub(pts[2],pts[0])));
+  let fc=[0,0,0];for(const p of pts){fc[0]+=p[0];fc[1]+=p[1];fc[2]+=p[2]}
+  fc=[fc[0]/pts.length,fc[1]/pts.length,fc[2]/pts.length];
+  if(vDot(n,vSub(fc,center))<0)n=[-n[0],-n[1],-n[2]];
+  F.push({p:pts,n,c:col,fc,sh:castShadow});
+}
+const BOXF=[[1,3,7,5],[0,4,6,2],[2,6,7,3],[0,1,5,4],[4,5,7,6],[0,2,3,1]];
+// balok meruncing: penampang w0 x d0 di y=0, w1 x d1 di y=len
+function taper(M,w0,d0,w1,d1,len,col){
+  const v=[];for(let i=0;i<8;i++){const t=i&2,w=t?w1:w0,d=t?d1:d0;v.push(mP(M,[(i&1?.5:-.5)*w,t?len:0,(i&4?.5:-.5)*d]))}
+  const c=mP(M,[0,len/2,0]);for(const f of BOXF)addPoly(f.map(k=>v[k]),col,c);
+}
+function box(M,sx,sy,sz,col){taper(mMul(M,mT(0,-sy/2,0)),sx,sz,sx,sz,sy,col)}
+// tabung sepanjang sumbu y (pusat di tengah)
+function cyl(M,r,h,col,capCol,n,r2){
+  n=n||20;r2=r2===undefined?r:r2;const top=[],bot=[];
+  for(let i=0;i<n;i++){const a=i/n*Math.PI*2,c=Math.cos(a),s=Math.sin(a);top.push(mP(M,[r2*c,h/2,r2*s]));bot.push(mP(M,[r*c,-h/2,r*s]))}
+  const ce=mP(M,[0,0,0]);
+  for(let i=0;i<n;i++){const j=(i+1)%n;addPoly([bot[i],bot[j],top[j],top[i]],col,ce)}
+  addPoly(top,capCol||col,ce);addPoly(bot,capCol||col,ce);
+}
+const RZ90=mRZ(Math.PI/2);
+function cylX(M,r,len,col,capCol,n){cyl(mMul(M,RZ90),r,len,col,capCol,n)}
+// housing sendi: tabung grafit + tutup krom + cincin aksen menyala di kedua sisi
+function joint(M,r,len){
+  cylX(M,r,len,C.graph,C.graph);
+  for(const sx of[-1,1]){
+    cylX(mMul(M,mT(sx*(len/2+.06),0,0)),r*.72,.12,C.acc,C.acc);
+    cylX(mMul(M,mT(sx*(len/2+.16),0,0)),r*.45,.1,C.chrome,C.chrome,14);
+  }
+}
+
+/* ----- kinematika: sudut servo -> pose ----- */
+function jAng(a){
+  const s=i=>(VIS.inv[i]?-1:1)*(a[i]-90);
+  const gmin=cfg?cfg.min[3]:10,gmax=cfg?cfg.max[3]:100;
+  let t=(a[3]-gmin)/((gmax-gmin)||1);t=Math.max(0,Math.min(1,t));
+  return{yaw:s(0)*D2R,sh:s(1)*D2R,el:(KIN.ELBOW0+s(2))*D2R,open:VIS.inv[3]?t:1-t};
+}
+function fk(a){
+  const j=jAng(a);
+  const Mb=mRY(j.yaw);
+  const Ms=mMul(Mb,mMul(mT(0,KIN.L0,0),mRX(j.sh)));
+  const Me=mMul(Ms,mMul(mT(0,KIN.L1,0),mRX(j.el)));
+  const Mw=mMul(Me,mMul(mT(0,KIN.L2,0),mRX(KIN.WRIST*D2R)));
+  const pts=[[0,0,0],mP(Ms,[0,0,0]),mP(Me,[0,0,0]),mP(Mw,[0,0,0]),mP(Mw,[0,1.9+Math.max(1.6,KIN.L3*.75),0])];
+  return{j,Mb,Ms,Me,Mw,pts};
+}
+
+/* ----- bangun scene ----- */
+let beltOff=0;
+const CONV={x:6,z:10.5,len:20,w:5,h:3.4};
+function buildScene(a){
+  F=[];
+  const L0=KIN.L0,L1=KIN.L1,L2=KIN.L2,L3=KIN.L3;
+  // pelat sel kerja
+  castShadow=false;
+  box(mT(0,.15,0),13,.3,13,C.cell);
+  box(mT(0,.33,0),12.2,.06,12.2,C.cellEdge);
+
+  // ---- conveyor rangka aluminium ----
+  castShadow=true;
+  const cx=CONV.x,cz=CONV.z,hl=CONV.len/2,hw=CONV.w/2,h=CONV.h;
+  for(const sz of[-1,1]){
+    box(mT(cx,h-.45,cz+sz*(hw+.25)),CONV.len,1.1,.45,C.metal);           // rel samping
+    box(mT(cx,h-.45,cz+sz*(hw+.49)),CONV.len-.4,.35,.04,C.dark);           // alur profil
+    for(const lx of[-hl+1.2,hl-1.2]){
+      box(mT(cx+lx,(h-1)/2,cz+sz*(hw-.2)),.5,h-1,.5,C.metal);              // kaki
+      box(mT(cx+lx,.12,cz+sz*(hw-.2)),1.1,.24,1.1,C.dark);                 // telapak kaki
+    }
+  }
+  box(mT(cx,h-1.6,cz),CONV.len-2.4,.3,.5,C.metal);                         // palang tengah
+  box(mT(cx,h-.12,cz),CONV.len-1.8,.24,CONV.w,C.belt);                     // sabuk
+  for(const sx of[-1,1]){
+    const R=mMul(mT(cx+sx*(hl-.9),h-.55,cz),mRX(Math.PI/2));
+    cyl(R,.65,CONV.w+.2,C.chrome,C.graph,16);                              // roller
+  }
+  box(mT(cx-hl-.2,h-.5,cz),.5,1.6,CONV.w+1.4,C.graph);                     // housing motor
+  cylX(mT(cx-hl-.8,h-.5,cz+hw-.6),.7,1.2,C.graph,C.dark);
+  box(mT(cx-hl-.47,h+.05,cz-hw+.4),.06,.3,.6,C.led);                        // lampu status
+  castShadow=false;
+  const P=CONV.len-2.4;
+  for(let k=0;k<10;k++){
+    const x=cx-hl+1.2+((k*P/10+beltOff)%P);
+    box(mT(x,h+.01,cz),.16,.03,CONV.w-.5,C.stripe);
+  }
+
+  // ---- lengan robot (gaya cobot) ----
+  castShadow=true;
+  const f=fk(a),{Mb,Ms,Me,Mw}=f,o=f.j.open;
+  const pedH=Math.max(1.4,L0*.3);
+  cyl(mT(0,.36+pedH*.15,0),3.3,pedH*.3,C.graph,C.graph,28,3.1);            // dasar pedestal
+  cyl(mT(0,.36+pedH*.62,0),2.75,pedH*.64,C.shell,C.shell,28,2.55);          // pedestal
+  cyl(mT(0,.36+pedH*.96,0),2.6,.1,C.acc,C.acc,28);                         // cincin menyala
+  const tY=.36+pedH;
+  cyl(mMul(Mb,mT(0,tY+.3,0)),2.3,.6,C.graph,C.graph,28,2.1);               // meja putar
+  const colH=L0-tY-.6;
+  cyl(mMul(Mb,mT(0,tY+.6+colH/2,0)),1.25,colH,C.shell,C.shell,24,1.15);    // kolom
+  cyl(mMul(Mb,mT(0,tY+.75,0)),1.3,.08,C.acc,C.acc,24);
+  box(mMul(Mb,mT(0,tY+.6+colH*.45,1.17)),.5,.22,.08,C.lens);                // penanda depan
+  joint(Ms,1.3,2.9);                                                       // sendi bahu (Siku)
+  cyl(mMul(Ms,mT(0,L1/2,0)),.95,L1-1.6,C.shell,C.shell,20,.8);              // lengan bawah
+  box(mMul(Ms,mT(.0,L1/2,.86)),.34,(L1-1.6)*.62,.06,C.acc);                 // strip aksen
+  joint(Me,1.05,2.4);                                                      // sendi siku (Lengan Atas)
+  cyl(mMul(Me,mT(0,L2/2,0)),.72,L2-1.2,C.shell2,C.shell2,18,.62);           // lengan atas
+  box(mMul(Me,mT(0,L2/2,.66)),.26,(L2-1.2)*.5,.05,C.graph);
+  joint(mMul(Me,mT(0,L2,0)),.78,1.8);                                       // pergelangan
+  // flens & gripper paralel
+  cyl(mMul(Mw,mT(0,.55,0)),.6,.4,C.chrome,C.chrome,18);
+  cyl(mMul(Mw,mT(0,.8,0)),.64,.08,C.acc,C.acc,18);
+  box(mMul(Mw,mT(0,1.2,0)),2.6,.7,1.0,C.graph);                            // badan gripper
+  box(mMul(Mw,mT(0,1.2,.52)),1.7,.22,.04,C.led);                           // indikator
+  box(mMul(Mw,mT(0,1.62,0)),2.4,.14,.5,C.chrome);                           // rel geser
+  const w=.3+o*1.0,fl=Math.max(1.6,L3*.75);
+  for(const sx of[-1,1]){
+    box(mMul(Mw,mT(sx*w,1.75,0)),.5,.36,.75,C.dark);                       // blok geser
+    taper(mMul(Mw,mT(sx*w,1.9,0)),.24,.62,.16,.5,fl,C.metal);              // jari
+    box(mMul(Mw,mT(sx*(w-.16),1.9+fl-.35,0)),.12,.7,.5,C.pad);              // ujung capit
+  }
+  castShadow=false;
+  return f;
+}
+
+/* ----- kamera & proyeksi ----- */
+const VIEWS={iso:{yaw:.78,pitch:.42,dist:54},front:{yaw:0,pitch:.18,dist:54},side:{yaw:Math.PI/2,pitch:.18,dist:54},top:{yaw:0,pitch:1.5,dist:60}};
+const cam={yaw:.78,pitch:.42,dist:54,tgt:[3.5,4,5]};
+let camGoal=null,dirty=true;
+const cv=$('#cv'),ctx=cv.getContext('2d');
+const sc=document.createElement('canvas'),sctx=sc.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR=Math.min(window.devicePixelRatio||1,2);W=cv.clientWidth;H=cv.clientHeight;
+  cv.width=sc.width=Math.round(W*DPR);cv.height=sc.height=Math.round(H*DPR);dirty=true;
+}
+let E,Rt,Up,Fw,FOC;
+function setupCam(){
+  const cp=Math.cos(cam.pitch);
+  E=[cam.tgt[0]+cam.dist*cp*Math.sin(cam.yaw),cam.tgt[1]+cam.dist*Math.sin(cam.pitch),cam.tgt[2]+cam.dist*cp*Math.cos(cam.yaw)];
+  Fw=vNorm(vSub(cam.tgt,E));Rt=vNorm(vCross(Fw,[0,1,0]));Up=vCross(Rt,Fw);
+  FOC=Math.min(W,H*1.25)*.5/Math.tan(19*D2R)*(W<600?1.2:1);
+}
+function toV(p){const d=vSub(p,E);return[vDot(d,Rt),vDot(d,Up),vDot(d,Fw)]}
+function prj(v){return[W/2+v[0]/v[2]*FOC,H*.54-v[1]/v[2]*FOC]}
+const NEAR=1;
+function line3(c,a,b){
+  let va=toV(a),vb=toV(b);
+  if(va[2]<NEAR&&vb[2]<NEAR)return;
+  if(va[2]<NEAR){const t=(NEAR-va[2])/(vb[2]-va[2]);va=[va[0]+(vb[0]-va[0])*t,va[1]+(vb[1]-va[1])*t,NEAR]}
+  if(vb[2]<NEAR){const t=(NEAR-vb[2])/(va[2]-vb[2]);vb=[vb[0]+(va[0]-vb[0])*t,vb[1]+(va[1]-vb[1])*t,NEAR]}
+  const p=prj(va),q=prj(vb);c.moveTo(p[0],p[1]);c.lineTo(q[0],q[1]);
+}
+
+let trail=[];
+function render(a,tgt){
+  setupCam();
+  ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);
+  // lantai grid
+  ctx.lineWidth=1;ctx.strokeStyle='rgba(120,160,230,.10)';ctx.beginPath();
+  for(let i=-26;i<=26;i+=2){line3(ctx,[i,0,-26],[i,0,26]);line3(ctx,[-26,0,i],[26,0,i])}
+  ctx.stroke();
+  // lingkar jangkauan lengan
+  const reach=KIN.L1+KIN.L2;ctx.strokeStyle='rgba(255,138,61,.25)';ctx.setLineDash([4,6]);ctx.beginPath();
+  for(let k=0;k<64;k++){const t1=k/64*Math.PI*2,t2=(k+1)/64*Math.PI*2;line3(ctx,[reach*Math.sin(t1),0,reach*Math.cos(t1)],[reach*Math.sin(t2),0,reach*Math.cos(t2)])}
+  ctx.stroke();ctx.setLineDash([]);
+
+  const f=buildScene(a);
+  // bayangan
+  sctx.setTransform(DPR,0,0,DPR,0,0);sctx.clearRect(0,0,W,H);sctx.fillStyle='#000';
+  for(const fa of F){if(!fa.sh)continue;
+    sctx.beginPath();let ok=true;
+    fa.p.forEach((p,k)=>{const g=[p[0]-LIGHT[0]*p[1]/LIGHT[1],.92,p[2]-LIGHT[2]*p[1]/LIGHT[1]],v=toV(g);if(v[2]<NEAR){ok=false;return}const s=prj(v);k?sctx.lineTo(s[0],s[1]):sctx.moveTo(s[0],s[1])});
+    if(ok)sctx.fill();
+  }
+  ctx.globalAlpha=.32;ctx.drawImage(sc,0,0,W,H);ctx.globalAlpha=1;
+
+  // permukaan (painter's algorithm)
+  const vis=[];
+  for(const fa of F){
+    if(vDot(fa.n,vSub(E,fa.fc))<=0)continue;
+    const vs=fa.p.map(toV);if(vs.some(v=>v[2]<NEAR))continue;
+    fa.s=vs.map(prj);fa.z=vs.reduce((s,v)=>s+v[2],0)/vs.length;vis.push(fa);
+  }
+  vis.sort((x,y)=>y.z-x.z);
+  for(const fa of vis){
+    const m=fa.c;let col;
+    if(m[4]){const g=.85+.15*Math.max(0,vDot(fa.n,LIGHT));col='rgb('+(m[0]*g|0)+','+(m[1]*g|0)+','+(m[2]*g|0)+')'}
+    else{
+      const V=vNorm(vSub(E,fa.fc)),Hh=vNorm([LIGHT[0]+V[0],LIGHT[1]+V[1],LIGHT[2]+V[2]]);
+      const k=.3+.6*Math.max(0,vDot(fa.n,LIGHT))+.12*Math.max(0,-vDot(fa.n,Fw));
+      const sp=m[3]*Math.pow(Math.max(0,vDot(fa.n,Hh)),28)*190;
+      col='rgb('+Math.min(255,m[0]*k+sp|0)+','+Math.min(255,m[1]*k+sp|0)+','+Math.min(255,m[2]*k+sp|0)+')';
+    }
+    ctx.fillStyle=ctx.strokeStyle=col;ctx.lineWidth=.6;ctx.beginPath();
+    fa.s.forEach((s,i)=>i?ctx.lineTo(s[0],s[1]):ctx.moveTo(s[0],s[1]));ctx.closePath();ctx.fill();ctx.stroke();
+  }
+
+  // jejak ujung gripper
+  const tip=f.pts[4];
+  if(VIS.trail){
+    const last=trail[trail.length-1];
+    if(!last||Math.hypot(tip[0]-last[0],tip[1]-last[1],tip[2]-last[2])>.2){trail.push(tip);if(trail.length>140)trail.shift()}
+    ctx.lineWidth=2.2;ctx.lineCap='round';
+    for(let i=1;i<trail.length;i++){ctx.strokeStyle='rgba(91,141,255,'+(i/trail.length*.85).toFixed(3)+')';ctx.beginPath();line3(ctx,trail[i-1],trail[i]);ctx.stroke()}
+  }
+  // pose target (skeleton kuning putus-putus)
+  if(VIS.ghost&&tgt&&tgt.some((t,i)=>Math.abs(t-a[i])>1)){
+    const g=fk(tgt).pts;
+    ctx.strokeStyle='rgba(245,197,24,.95)';ctx.lineWidth=2;ctx.setLineDash([5,4]);ctx.beginPath();
+    for(let i=1;i<g.length;i++)line3(ctx,g[i-1],g[i]);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#F5C518';
+    for(const p of g){const v=toV(p);if(v[2]<NEAR)continue;const s=prj(v);ctx.beginPath();ctx.arc(s[0],s[1],3.2,0,7);ctx.fill()}
+  }
+  // titik ujung
+  const tv=toV(tip);if(tv[2]>NEAR){const s=prj(tv);ctx.fillStyle='#5B8DFF';ctx.beginPath();ctx.arc(s[0],s[1],3.5,0,7);ctx.fill();
+    ctx.strokeStyle='rgba(91,141,255,.45)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(s[0],s[1],7,0,7);ctx.stroke()}
+  $('#tip').innerHTML='Ujung &asymp; x<b>'+tip[0].toFixed(1)+'</b>tinggi<b>'+tip[1].toFixed(1)+'</b>z<b>'+tip[2].toFixed(1)+'</b>cm';
+}
+
+/* ----- loop animasi: interpolasi halus antar update status (10 Hz) ----- */
+let disp=null,lastT=0;
+function homePose(){return cfg?cfg.home.slice():[90,90,90,40]}
+function frame(t){
+  const dt=Math.min(.05,(t-lastT)/1000||0);lastT=t;
+  let anim=false;
+  const goal=st?st.pos:homePose();
+  if(!disp)disp=goal.slice();
+  for(let i=0;i<4;i++){const d=goal[i]-disp[i];if(Math.abs(d)>.05){disp[i]+=d*Math.min(1,dt*12);anim=true}else disp[i]=goal[i]}
+  if(st&&st.conv){const P=CONV.len-2.4;beltOff=((beltOff+dt*st.conv/100*7)%P+P)%P;anim=true}
+  if(camGoal){
+    let dy=camGoal.yaw-cam.yaw;dy=Math.atan2(Math.sin(dy),Math.cos(dy));
+    const k=Math.min(1,dt*7);cam.yaw+=dy*k;cam.pitch+=(camGoal.pitch-cam.pitch)*k;cam.dist+=(camGoal.dist-cam.dist)*k;
+    if(Math.abs(dy)<.002&&Math.abs(camGoal.pitch-cam.pitch)<.002&&Math.abs(camGoal.dist-cam.dist)<.05)camGoal=null;anim=true;
+  }
+  if((anim||dirty)&&W>0){render(disp,st?st.tgt:null);dirty=false}
+  requestAnimationFrame(frame);
+}
+
+/* ----- interaksi kamera: geser = putar, cubit/scroll = zoom ----- */
+const ptrs=new Map();let pinch0=0,dist0=0;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,[e.clientX,e.clientY]);camGoal=null;
+  if(ptrs.size===2){const[a,b]=[...ptrs.values()];pinch0=Math.hypot(a[0]-b[0],a[1]-b[1]);dist0=cam.dist}});
+cv.addEventListener('pointermove',e=>{
+  if(!ptrs.has(e.pointerId))return;
+  const prev=ptrs.get(e.pointerId),cur=[e.clientX,e.clientY];ptrs.set(e.pointerId,cur);
+  if(ptrs.size===1){cam.yaw-=(cur[0]-prev[0])*.009;cam.pitch=clamp(cam.pitch+(cur[1]-prev[1])*.007,.03,1.52)}
+  else if(ptrs.size===2){const[a,b]=[...ptrs.values()];const d=Math.hypot(a[0]-b[0],a[1]-b[1])||1;cam.dist=clamp(dist0*pinch0/d,20,120)}
+  setViewBtn(null);dirty=true;
+});
+['pointerup','pointercancel'].forEach(ev=>cv.addEventListener(ev,e=>ptrs.delete(e.pointerId)));
+cv.addEventListener('wheel',e=>{e.preventDefault();cam.dist=clamp(cam.dist*(1+Math.sign(e.deltaY)*.08),20,120);camGoal=null;dirty=true},{passive:false});
+cv.addEventListener('dblclick',()=>goView('iso'));
+function setViewBtn(v){$$('[data-view]').forEach(b=>b.classList.toggle('on',b.dataset.view===v))}
+function goView(v){camGoal=Object.assign({},VIEWS[v]);setViewBtn(v)}
+$$('[data-view]').forEach(b=>b.onclick=()=>goView(b.dataset.view));
+setViewBtn('iso');
+
+/* ----- pengaturan tampilan ----- */
+$('#vsetBtn').onclick=()=>{$('#vset').classList.toggle('show');$('#vsetBtn').classList.toggle('on')};
+$('#vGhost').checked=VIS.ghost;$('#vTrail').checked=VIS.trail;
+$('#vGhost').onchange=e=>{VIS.ghost=e.target.checked;$('#lgT').style.display=VIS.ghost?'':'none';saveVis();dirty=true};
+$('#vTrail').onchange=e=>{VIS.trail=e.target.checked;trail=[];saveVis();dirty=true};
+$('#lgT').style.display=VIS.ghost?'':'none';
+$('#vClear').onclick=()=>{trail=[];dirty=true};
+$('#vReset').onclick=()=>goView('iso');
+function buildInv(){
+  const names=cfg?cfg.names:['Base','Siku','Lengan Atas','Gripper'];
+  $('#vInv').innerHTML=names.map((n,i)=>'<label><input type="checkbox" data-inv="'+i+'"'+(VIS.inv[i]?' checked':'')+'> Balik arah '+n+'</label>').join('');
+  $$('[data-inv]').forEach(c=>c.onchange=()=>{VIS.inv[+c.dataset.inv]=c.checked;trail=[];saveVis();dirty=true});
+}
+buildInv();
+const stage=$('#stage');
+stage.classList.toggle('big',!!VIS.big);
+$('#stageSize').onclick=()=>{VIS.big=!VIS.big;stage.classList.toggle('big',VIS.big);saveVis()};
+if(window.ResizeObserver)new ResizeObserver(resize).observe(cv);else window.addEventListener('resize',resize);
+resize();requestAnimationFrame(frame);
+
+setConn();
+</script>
+</body>
+</html>

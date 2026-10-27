@@ -1,6 +1,6 @@
-# Robot Arm + Conveyor (ESP32)
+# Robot Arm + Motor DC (ESP32)
 
-Kontrol robot arm 4 servo (Base, Siku, Lengan Atas, Gripper) + conveyor motor DC dari browser laptop, dengan tampilan 3D, mode manual, dan perekam program gerakan.
+Kontrol robot arm 4 servo (Base, Siku, Lengan Atas, Gripper) + motor DC dari browser laptop, dengan tampilan 3D, mode manual, dan perekam program gerakan. Motor hanya dikontrol arah kiri/kanan dan berhenti; ENA L298N memakai jumper sehingga kecepatannya tidak diatur dari web.
 
 Ada **dua versi** yang bisa dipilih:
 
@@ -37,12 +37,13 @@ RobotArm2/
 | Servo Siku | GPIO 14 |
 | Servo Lengan Atas | GPIO 27 |
 | Servo Gripper | GPIO 26 |
-| L298N ENA (PWM, **lepas jumper ENA**) | GPIO 25 |
-| L298N IN1 | GPIO 33 |
-| L298N IN2 | GPIO 32 |
+| L298N ENA (WiFi) | Jumper tetap terpasang |
+| L298N IN1 (WiFi) | GPIO 16 |
+| L298N IN2 (WiFi) | GPIO 17 |
 
 - Board: **ESP32 Dev Module**
 - Servo: SG90 (pulsa 500–2400 µs)
+- L298N versi WiFi: pasang jumper ENA; satukan GND L298N dengan GND ESP32 dan gunakan catu daya motor yang sesuai. Web menyediakan arah kiri/kanan dan berhenti tanpa kontrol kecepatan.
 - Kalau servo masih ambil daya dari USB laptop, biarkan `LOW_POWER_MODE = true` di sketch supaya ESP tidak restart (brownout). Kalau servo sudah pakai supply 5V terpisah, boleh diubah ke `false`.
 - Kalibrasi batas sudut servo (`SERVO_MIN`, `SERVO_MAX`, `SERVO_HOME`) di bagian **KONFIGURASI** sketch sesuai rangka kamu, supaya servo tidak memaksa mentok.
 
@@ -158,6 +159,5 @@ Kalau ESP tidak bisa konek, izinkan port ini di firewall laptop.
 | ESP restart terus saat servo bergerak | Pakai supply 5V terpisah untuk servo, atau biarkan `LOW_POWER_MODE = true` |
 | Tombol "Hubungkan ke ESP" tidak muncul port | Tutup Serial Monitor, pakai Chrome/Edge, cek kabel USB (harus kabel data) |
 | Versi WiFi: ESP tidak terhubung ke server | Cek SSID/password, pastikan WiFi 2.4 GHz & satu jaringan, isi `SERVER_HOST` manual, cek firewall port 8765/8766 |
-| Conveyor arahnya terbalik | Ubah `CONVEYOR_INVERT = true` di sketch |
-| Motor conveyor tidak mau mulai berputar | Naikkan `MOTOR_MIN_DUTY` di sketch |
+| Arah motor WiFi terasa terbalik | Ubah `CONVEYOR_INVERT = true` di sketch WiFi |
 | Log ESP | Buka Serial Monitor 115200 baud (versi WiFi) |

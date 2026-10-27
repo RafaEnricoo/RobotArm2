@@ -31,12 +31,12 @@
 // =====================================================================
 
 // ---- WiFi & server laptop ----
-const char* WIFI_SSID = "NAMA_WIFI";      // ganti dengan nama WiFi kamu
-const char* WIFI_PASS = "PASSWORD_WIFI";  // ganti dengan password WiFi kamu
+const char* WIFI_SSID = "Sir";      // ganti dengan nama WiFi kamu
+const char* WIFI_PASS = "tempebosok";  // ganti dengan password WiFi kamu
 // Kosongkan ("") supaya ESP mencari laptop otomatis lewat broadcast UDP.
 // Kalau auto-cari gagal (WiFi kampus sering memblokir broadcast),
 // isi dengan IP laptop yang tampil saat server.py dijalankan, mis. "192.168.1.10".
-const char*    SERVER_HOST    = "";
+const char*    SERVER_HOST    = "192.168.174.86";
 const uint16_t SERVER_PORT    = 8765;
 const uint16_t DISCOVERY_PORT = 8766;
 
@@ -57,13 +57,11 @@ const int SERVO_HOME[NUM_SERVO] = { 90,  0,  180,  180};
 const int SERVO_US_MIN = 500;
 const int SERVO_US_MAX = 2400;
 
-// ---- Motor DC conveyor via L298N ----
-// Lepas jumper ENA di L298N, lalu sambungkan ENA ke pin di bawah (PWM).
-const uint8_t PIN_ENA = 25;
-const uint8_t PIN_IN1 = 33;
-const uint8_t PIN_IN2 = 32;
-const bool    CONVEYOR_INVERT = false; // true kalau arah maju/mundur terbalik
-const int     MOTOR_MIN_DUTY  = 110;   // duty minimal (0-255) agar motor mulai berputar
+// ---- Motor DC via L298N ----
+// ENA tetap dijumper; arah saja yang dikontrol lewat IN1 dan IN2.
+const uint8_t PIN_IN1 = 16;
+const uint8_t PIN_IN2 = 17;
+const bool    CONVEYOR_INVERT = false; // true kalau kanan/kiri terbalik
 
 // ---- Mode hemat daya (untuk servo yang ambil daya dari USB laptop) ----
 // true  = servo bergerak lebih pelan, maksimal 2 servo bergerak bersamaan
@@ -83,7 +81,6 @@ const char* PROG_FILE = "/program.json";
 // =====================================================================
 
 Servo     servo[NUM_SERVO];
-ESP32PWM  motorPwm;
 WebSocketsClient ws;
 WiFiUDP  udp;
 bool     wifiUp      = false;
@@ -103,11 +100,11 @@ int   tgtPos[NUM_SERVO];        // posisi tujuan
 int   lastUs[NUM_SERVO];        // pulsa terakhir yang ditulis
 float moveSpeed   = 60;         // kecepatan gerak aktif (derajat/detik)
 int   manualSpeed = 60;         // kecepatan untuk mode manual
-int   convVal     = 0;          // conveyor: -100 (mundur) .. 0 .. 100 (maju)
+int   convVal     = 0;          // arah motor: -1 (kiri) .. 0 (berhenti) .. 1 (kanan)
 
 struct Step {
   uint8_t  a[NUM_SERVO];  // sudut tiap servo
-  int8_t   conv;          // conveyor -100..100
+  int8_t   conv;          // arah motor -1 kiri, 0 berhenti, 1 kanan
   uint16_t wait;          // tunggu setelah pose tercapai (ms)
   uint8_t  spd;           // kecepatan gerak ke pose ini (°/s)
 };
@@ -180,19 +177,16 @@ void holdPosition() {
 }
 
 void setConveyor(int v) {
-  v = constrain(v, -100, 100);
+  v = (v > 0) ? 1 : (v < 0) ? -1 : 0;
   convVal = v;
   if (v == 0) {
     digitalWrite(PIN_IN1, LOW);
     digitalWrite(PIN_IN2, LOW);
-    motorPwm.write(0);
     return;
   }
   bool fwd = (v > 0) != CONVEYOR_INVERT;
   digitalWrite(PIN_IN1, fwd ? HIGH : LOW);
   digitalWrite(PIN_IN2, fwd ? LOW : HIGH);
-  int duty = map(abs(v), 1, 100, MOTOR_MIN_DUTY, 255);
-  motorPwm.write(duty);
 }
 
 // =====================================================================
@@ -290,7 +284,8 @@ bool loadProgramFromJson(JsonVariantConst root) {
     if (n >= MAX_STEPS) break;
     JsonArrayConst a = o["a"];
     for (int j = 0; j < NUM_SERVO; j++) prog[n].a[j] = clampAngle(j, a[j] | SERVO_HOME[j]);
-    prog[n].conv = constrain((int)(o["c"] | 0), -100, 100);
+    int c = (int)(o["c"] | 0); // file program lama berisi persentase; ubah jadi arah saja
+    prog[n].conv = (c > 0) ? 1 : (c < 0) ? -1 : 0;
     prog[n].wait = constrain((long)(o["d"] | 500), 0L, 60000L);
     prog[n].spd  = constrain((int)(o["s"] | 60), 5, 240);
     n++;
@@ -459,7 +454,10 @@ void handleCommand(uint8_t num, JsonDocument& doc) {
     sendMsg(-1, "ok", "Step #" + String(i + 1) + " ditimpa dengan pose sekarang.");
   }
   else if (c == "edit" && validIdx(i)) {
-    if (!doc["c"].isNull()) prog[i].conv = constrain((int)doc["c"], -100, 100);
+    if (!doc["c"].isNull()) {
+      int c = (int)doc["c"];
+      prog[i].conv = (c > 0) ? 1 : (c < 0) ? -1 : 0;
+    }
     if (!doc["d"].isNull()) prog[i].wait = constrain((long)doc["d"], 0L, 60000L);
     if (!doc["s"].isNull()) prog[i].spd  = constrain((int)doc["s"], 5, 240);
     changed = true;
@@ -614,19 +612,14 @@ void readResetReason() {
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n=== Robot Arm + Conveyor (WiFi) ===");
+  Serial.println("\n=== Robot Arm + Motor DC (WiFi) ===");
   readResetReason();
 
-  // Motor conveyor (L298N)
+  // Motor DC (L298N, ENA jumper)
   pinMode(PIN_IN1, OUTPUT);
   pinMode(PIN_IN2, OUTPUT);
   digitalWrite(PIN_IN1, LOW);
   digitalWrite(PIN_IN2, LOW);
-
-  ESP32PWM::allocateTimer(0);
-  ESP32PWM::allocateTimer(1);
-  ESP32PWM::allocateTimer(2);
-  ESP32PWM::allocateTimer(3);
 
   // Penyimpanan & program
   if (!LittleFS.begin(true)) Serial.println("LittleFS gagal di-mount");
@@ -636,7 +629,6 @@ void setup() {
   for (int i = 0; i < NUM_SERVO; i++) { curPos[i] = tgtPos[i] = SERVO_HOME[i]; lastUs[i] = -1; }
   if (LOW_POWER_MODE) setCpuFrequencyMhz(80);   // CPU lebih pelan = arus lebih kecil
 
-  motorPwm.attachPin(PIN_ENA, 1000, 8);   // 1 kHz, 8-bit (0-255)
   setConveyor(0);
 
   // Servo dinyalakan bergantian supaya lonjakan arus tidak bersamaan

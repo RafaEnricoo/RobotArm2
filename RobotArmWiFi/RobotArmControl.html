@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0E1726">
-<title>Robot Arm Control (WiFi)</title>
+<title>Robot Arm + Motor DC (WiFi)</title>
 <style>
 :root{
   --ink:#0E1726;--panel:#14213A;--panel2:#1B2B49;--line:#263856;--txt:#E8EDF5;--mut:#8C9CB8;
@@ -172,7 +172,7 @@ input[type=number]{width:100%;background:var(--ink);border:1px solid var(--line)
       <path d="M26 17 l0 4 M30 15 l0 5" stroke="#FF8A3D" stroke-width="2" stroke-linecap="round"/>
     </svg>
     <div class="brand">
-      <h1>Robot Arm + Conveyor</h1>
+      <h1>Robot Arm + Motor DC</h1>
       <p><span class="dot" id="dot"></span><span id="connTxt">Belum terhubung</span></p>
     </div>
     <button class="btn acc" id="btnConn" style="margin-left:auto">Hubungkan</button>
@@ -229,21 +229,18 @@ input[type=number]{width:100%;background:var(--ink);border:1px solid var(--line)
       </div>
 
       <div class="sec">
-        <h2>Conveyor</h2>
+        <h2>Motor DC</h2>
         <div class="dirs">
-          <button class="btn mctl" data-dir="-1">Mundur</button>
+          <button class="btn mctl" data-dir="-1">Kiri</button>
           <button class="btn mctl" data-dir="0">Berhenti</button>
-          <button class="btn mctl" data-dir="1">Maju</button>
+          <button class="btn mctl" data-dir="1">Kanan</button>
         </div>
-        <label class="lbl" style="margin-top:12px">Kecepatan conveyor <b><span id="cspdV">70</span>%</b>
-          <input type="range" id="cspd" class="mctl" min="1" max="100" value="70">
-        </label>
         <div class="state">Sekarang: <b id="convState">-</b></div>
       </div>
 
       <div class="sec">
         <h2>Rekam gerakan</h2>
-        <p class="note">Atur pose dan conveyor di atas, lalu simpan sebagai step. Saat dijalankan, tiap step: conveyor diset, robot bergerak ke pose, menunggu sesuai jeda, lalu lanjut ke step berikutnya.</p>
+        <p class="note">Atur pose dan arah motor di atas, lalu simpan sebagai step. Saat dijalankan, tiap step: arah motor diset, robot bergerak ke pose, menunggu sesuai jeda, lalu lanjut ke step berikutnya.</p>
         <div class="g2">
           <label class="lbl">Jeda setelah sampai (ms)<input type="number" id="recD" min="0" max="60000" step="100" value="500"></label>
           <label class="lbl">Kecepatan ke pose ini (&deg;/detik)<input type="number" id="recS" min="5" max="240" value="60"></label>
@@ -266,7 +263,7 @@ input[type=number]{width:100%;background:var(--ink);border:1px solid var(--line)
       </div>
       <div class="sec">
         <h2>Urutan gerakan <span id="nSteps" style="color:var(--mut);font-size:15px"></span></h2>
-        <p class="note">Conveyor: positif maju, negatif mundur, 0 berhenti (dalam persen). &ldquo;Coba&rdquo; menggerakkan robot ke pose step itu; &ldquo;Timpa&rdquo; mengganti pose step dengan posisi sekarang.</p>
+        <p class="note">Arah motor: -1 kiri, 0 berhenti, 1 kanan. &ldquo;Coba&rdquo; menggerakkan robot ke pose step itu; &ldquo;Timpa&rdquo; mengganti pose step dengan posisi sekarang.</p>
         <div class="steps" id="steps"></div>
         <div class="row" style="margin-top:4px">
           <button class="btn sm" id="btnExport">Simpan ke file</button>
@@ -290,7 +287,7 @@ input[type=number]{width:100%;background:var(--ink);border:1px solid var(--line)
           <dt>Mode</dt><dd id="kMode">-</dd>
           <dt>Step aktif</dt><dd id="kStep">-</dd>
           <dt>Siklus selesai</dt><dd id="kCyc">-</dd>
-          <dt>Conveyor</dt><dd id="kConv">-</dd>
+          <dt>Motor DC</dt><dd id="kConv">-</dd>
           <dt>Kecepatan servo</dt><dd id="kSpd">-</dd>
           <dt>Web terhubung</dt><dd id="kCl">-</dd>
           <dt>Waktu menyala</dt><dd id="kUp">-</dd>
@@ -315,7 +312,7 @@ input[type=number]{width:100%;background:var(--ink);border:1px solid var(--line)
 const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
 const MODE_TXT={MANUAL:'Manual',AUTO:'Otomatis',ESTOP:'E-STOP'};
 let ws=null, cfg=null, st=null, prog={steps:[],loop:true,mspd:60};
-let dragging={}, convDir=0, convSpd=70, lastMode='', lastStep=-2, recSTouched=false, connected=false;
+let dragging={}, convDir=0, lastMode='', lastStep=-2, recSTouched=false, connected=false;
 
 /* ======================================================================
    UKURAN ROBOT UNTUK VISUALISASI 3D (cm) — samakan dengan robot asli
@@ -433,11 +430,11 @@ $('#mspd').oninput=()=>{setFill($('#mspd'));$('#mspdV').textContent=$('#mspd').v
 $('#mspd').onchange=()=>send({cmd:'mspeed',val:+$('#mspd').value});
 
 /* ================= conveyor ================= */
-function sendConv(){send({cmd:'conv',val:convDir*convSpd})}
+function sendConv(){send({cmd:'conv',val:convDir})}
 $$('[data-dir]').forEach(b=>b.onclick=()=>{convDir=+b.dataset.dir;sendConv()});
-$('#cspd').oninput=()=>{const e=$('#cspd');setFill(e);convSpd=+e.value;$('#cspdV').textContent=convSpd;if(convDir)throttle('cv',80,sendConv)};
-setFill($('#cspd'));setFill($('#mspd'));
-function convTxt(c){return c===0?'Berhenti':(c>0?'Maju ':'Mundur ')+Math.abs(c)+'%'}
+setFill($('#mspd'));
+function convSign(c){return c>0?1:c<0?-1:0}
+function convTxt(c){return convSign(c)===0?'Berhenti':convSign(c)>0?'Kanan':'Kiri'}
 
 /* ================= rekam & program ================= */
 $('#recS').oninput=()=>{recSTouched=true};
@@ -474,9 +471,9 @@ function renderProg(){
     const names=cfg?cfg.names:['S1','S2','S3','S4'];
     L.innerHTML=prog.steps.map((s,i)=>
       '<div class="step" data-i="'+i+'"><span class="num">'+(i+1)+'</span>'+
-        '<div class="pose">'+s.a.map((a,j)=>'<span>'+names[j]+' '+a+'&deg;</span>').join('')+'<span class="cv">Conveyor '+convTxt(s.c).toLowerCase()+'</span></div>'+
+        '<div class="pose">'+s.a.map((a,j)=>'<span>'+names[j]+' '+a+'&deg;</span>').join('')+'<span class="cv">Motor '+convTxt(s.c).toLowerCase()+'</span></div>'+
         '<div class="g3">'+
-          '<label class="lbl">Conveyor (%)<input type="number" class="mctl" data-k="c" min="-100" max="100" value="'+s.c+'"></label>'+
+          '<label class="lbl">Arah motor (-1 kiri, 0 berhenti, 1 kanan)<input type="number" class="mctl" data-k="c" min="-1" max="1" step="1" value="'+convSign(s.c)+'"></label>'+
           '<label class="lbl">Jeda (ms)<input type="number" class="mctl" data-k="d" min="0" max="60000" step="100" value="'+s.d+'"></label>'+
           '<label class="lbl">Kecepatan<input type="number" class="mctl" data-k="s" min="5" max="240" value="'+s.s+'"></label>'+
         '</div>'+
@@ -823,7 +820,7 @@ function frame(t){
   const goal=st?st.pos:homePose();
   if(!disp)disp=goal.slice();
   for(let i=0;i<4;i++){const d=goal[i]-disp[i];if(Math.abs(d)>.05){disp[i]+=d*Math.min(1,dt*12);anim=true}else disp[i]=goal[i]}
-  if(st&&st.conv){const P=CONV.len-2.4;beltOff=((beltOff+dt*st.conv/100*7)%P+P)%P;anim=true}
+  if(st&&st.conv){const P=CONV.len-2.4;beltOff=((beltOff+dt*convSign(st.conv)*7)%P+P)%P;anim=true}
   if(camGoal){
     let dy=camGoal.yaw-cam.yaw;dy=Math.atan2(Math.sin(dy),Math.cos(dy));
     const k=Math.min(1,dt*7);cam.yaw+=dy*k;cam.pitch+=(camGoal.pitch-cam.pitch)*k;cam.dist+=(camGoal.dist-cam.dist)*k;
